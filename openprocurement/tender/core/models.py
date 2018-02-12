@@ -17,7 +17,7 @@ from openprocurement.api.models import (
     IsoDateTimeType, ListType, Document as BaseDocument, CPVClassification,
     Location, Contract as BaseContract, Value,
     PeriodEndRequired as BasePeriodEndRequired,
-    Address
+    Address, Unit
 )
 from openprocurement.api.models import Item as BaseItem
 from openprocurement.api.models import (
@@ -233,8 +233,34 @@ class LotAuctionPeriod(Period):
         return rounding_shouldStartAfter(start_after, tender).isoformat()
 
 
+class ItemValue(Value):
+    currency = StringType(max_length=3, min_length=3)
+    valueAddedTaxIncluded = BooleanType()
+
+    @serializable(serialized_name="currency", serialize_when_none=False)
+    def unit_currency(self):
+        if self.currency is not None:
+            return self.currency
+        return get_tender(self).value.currency
+
+    @serializable(serialized_name="valueAddedTaxIncluded", serialize_when_none=False)
+    def unit_valueAddedTaxIncluded(self):
+        if self.valueAddedTaxIncluded is not None:
+            return self.valueAddedTaxIncluded
+        return get_tender(self).value.valueAddedTaxIncluded
+
+
+class ItemUnit(Unit):
+    value = ModelType(ItemValue)
+
+
 class Item(BaseItem):
+    class Options:
+        roles = {
+            'edit_contract': whitelist('unit')
+        }
     """A good, service, or work to be contracted."""
+    unit = ModelType(ItemUnit)
     classification = ModelType(CPVClassification, required=True)
     deliveryLocation = ModelType(Location)
 
@@ -247,12 +273,14 @@ class Contract(BaseContract):
     class Options:
         roles = {
             'create': blacklist('id', 'status', 'date', 'documents', 'dateSigned'),
-            'edit': blacklist('id', 'documents', 'date', 'awardID', 'suppliers', 'items', 'contractID'),
+            'edit': whitelist(),
+            'edit_contract': blacklist('id', 'documents', 'date', 'awardID', 'suppliers', 'contractID'),
             'edit_pending.signed': whitelist('status'),
             'embedded': schematics_embedded_role,
             'view': schematics_default_role,
         }
 
+    items = ListType(ModelType(Item))
     value = ModelType(Value)
     awardID = StringType(required=True)
     documents = ListType(ModelType(Document), default=list())
@@ -275,8 +303,12 @@ class Contract(BaseContract):
             root = root.__parent__
         request = root.request
         role = 'edit'
-        if request.authenticated_role == 'tender_owner' and request.context.status == 'pending.signed':
-            role = 'edit_pending.signed'
+        if request.authenticated_role == 'tender_owner':
+            role = 'edit_contract'
+
+            if request.context.status == 'pending.signed':
+                role = 'edit_pending.signed'
+
         return role
 
 

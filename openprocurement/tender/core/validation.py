@@ -451,3 +451,11 @@ def validate_contract_signing(request):
         ]
         if pending_complaints or pending_awards_complaints:
             raise_operation_error(request, 'Can\'t sign contract before reviewing all complaints')
+
+
+def validate_contract_items_count_modification(request):
+    # as it is alowed to set/change contract.item.unit.value we need to
+    # ensure that nobody is able to add or delete contract.item
+    data = request.validated['data']
+    if data.get('items') and len(data['items']) != len(request.context['items']):
+        raise_operation_error(request, 'Can\'t change items count')
